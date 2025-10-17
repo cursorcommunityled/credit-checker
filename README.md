@@ -8,13 +8,6 @@ Internal tool to batch-verify Cursor referral link status and calculate total av
 2. Add your referral URLs (one per line or in table format)
 3. Run the checker
 
-Example links.md:
-```markdown
-https://cursor.com/referral?code=ABC123
-https://cursor.com/referral?code=XYZ789
-https://cursor.com/referral?code=DEF456
-```
-
 ## Quick Start
 
 ```bash
@@ -78,19 +71,4 @@ credit-checker/
 
 ## Adding Your Links
 
-The tool accepts any markdown file with Cursor referral URLs. Supported formats:
-
-**Simple list:**
-```markdown
-https://cursor.com/referral?code=CODE1
-https://cursor.com/referral?code=CODE2
-```
-
-**Markdown table:**
-```markdown
-| URL |
-| --- |
-| https://cursor.com/referral?code=CODE1 |
-```
-
-**Any format** - the tool extracts URLs automatically regardless of markdown formatting.
+The tool accepts any markdown file with Cursor referral URLs, regardless of markdown formatting.
