@@ -12,6 +12,7 @@ interface ReferralStatus {
 const REFERRAL_REGEX = /https?:\/\/cursor\.com\/referral\?code=([A-Z0-9]+)/i;
 const API_ENDPOINT = "https://cursor.com/api/dashboard/check-referral-code";
 const DELAY_MS = parseInt(process.env.CHECK_DELAY_MS ?? "500", 10);
+const DEFAULT_INPUT_PATH = "links.md";
 
 async function readReferralLinks(path: string): Promise<string[]> {
   const stream = createReadStream(path, { encoding: "utf8" });
@@ -168,17 +169,70 @@ function summarize(statuses: ReferralStatus[]): string {
   return summaryLines.join("\n");
 }
 
+function printUsage() {
+  console.log("Cursor Referral Link Checker");
+  console.log("============================");
+  console.log("");
+  console.log("Checks referral links directly via Cursor's API.");
+  console.log("");
+  console.log("Usage:");
+  console.log("  npm run check");
+  console.log("  npm run check -- my-referrals.md");
+  console.log("");
+  console.log("Default input file:");
+  console.log(`  ${DEFAULT_INPUT_PATH}`);
+  console.log("");
+  console.log("To get started:");
+  console.log("  1. Copy links-template.md to links.md");
+  console.log("  2. Add your referral URLs");
+  console.log("  3. Run: npm run check");
+}
+
 async function main() {
-  const path = process.argv[2] ?? "ep02.md";
+  if (process.argv.includes("--help") || process.argv.includes("-h")) {
+    printUsage();
+    return;
+  }
+
+  const path = process.argv[2] ?? DEFAULT_INPUT_PATH;
   const backupPath = `${path}.bak`;
 
-  const original = await readFile(path, "utf8");
+  console.log("Cursor Referral Link Checker");
+  console.log("============================");
+  console.log("");
+  console.log("Using the direct API checker. No browser needed.");
+  console.log("");
+
+  let original: string;
+  try {
+    original = await readFile(path, "utf8");
+  } catch {
+    console.error(`Error: Could not read file '${path}'`);
+    console.error("Make sure the file exists and contains referral URLs.");
+    console.error("");
+    printUsage();
+    process.exitCode = 1;
+    return;
+  }
+
   await writeFile(backupPath, original, "utf8");
+  console.log(`Backup created: ${backupPath}`);
 
   let urls = await readReferralLinks(path);
   urls = [...new Set(urls)];
   const statuses: ReferralStatus[] = [];
 
+  console.log(`Found ${urls.length} referral links`);
+
+  if (urls.length === 0) {
+    console.error("Error: No referral links found in file.");
+    console.error("Add Cursor referral URLs in this format:");
+    console.error("  https://cursor.com/referral?code=YOUR_CODE");
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log("");
   console.log(`Checking ${urls.length} referral codes (deduplicated)...`);
 
   for (let i = 0; i < urls.length; i++) {
@@ -192,8 +246,9 @@ async function main() {
       continue;
     }
 
-    console.log(`[${i + 1}/${urls.length}] Checking ${code}...`);
+    process.stdout.write(`[${i + 1}/${urls.length}] Checking ${code}... `);
     const status = await checkReferral(code);
+    console.log(status);
     statuses.push({ url, status, lastChecked: timestamp });
 
     // Delay between different codes to avoid rate limiting
@@ -202,6 +257,7 @@ async function main() {
     }
   }
 
+  console.log("");
   const table = buildTable(statuses);
   await writeFile(path, `${table}\n`, "utf8");
   console.log(`All results saved to: ${path}`);
@@ -223,4 +279,3 @@ main().catch((error) => {
   console.error("Failed to process referral codes:", error);
   process.exitCode = 1;
 });
-
