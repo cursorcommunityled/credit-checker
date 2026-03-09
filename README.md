@@ -1,74 +1,145 @@
 # Cursor Referral Link Checker
 
-Internal tool to batch-verify Cursor referral link status and calculate total available credits.
+Batch-check Cursor referral links from a markdown file and separate links that are still usable from ones that have already been redeemed.
 
-## Setup Your Links
+This repo uses a built-in API-based checker. It does not need browser automation, Playwright, or a manual login flow.
 
-1. Copy `links-template.md` to `links.md`
-2. Add your referral URLs (one per line or in table format)
-3. Run the checker
+## What It Does
+
+The checker reads referral URLs from a markdown file, extracts the referral codes, checks each code against Cursor's referral API, and then writes the results back to disk.
+
+For each run it will:
+
+1. Read referral links from your input markdown file
+2. Deduplicate repeated links
+3. Check each code and classify it as `active`, `redeemed`, or `unknown`
+4. Overwrite the input file with a results table
+5. Save a backup copy of the original file as `<input>.bak`
+6. Create `active-links-YYYY-MM-DD.md` with only the active links
 
 ## Quick Start
 
+1. Install dependencies:
+
 ```bash
 npm install
-npm run check-browser links.md
 ```
 
-A browser window will open and automatically verify all links.
+2. Copy `links-template.md` to `links.md`
 
-## Output Files
+3. Add your referral URLs
 
-- `active-links-YYYY-MM-DD.md` - List of active links with total credits available
-- `links.md` - Updated with current status for each link
-- `links.md.bak` - Backup of your original file
+4. Run the checker:
+
+```bash
+npm run check
+```
 
 ## Usage
 
-Check your links file:
+Run against the default file `links.md`:
+
 ```bash
-npm run check-browser links.md
+npm run check
 ```
 
-Check a different file:
+Run against a different markdown file:
+
 ```bash
-npm run check-browser my-referrals.md
+npm run check -- my-referrals.md
 ```
 
-Adjust speed if rate limited:
+Show command help:
+
 ```bash
-# Windows
+npm run check -- --help
+```
+
+Slow the requests down if you hit rate limits:
+
+```bash
+# Windows PowerShell
 $env:CHECK_DELAY_MS="2000"
-npm run check-browser
+npm run check
 
 # Mac/Linux
-CHECK_DELAY_MS=2000 npm run check-browser
+CHECK_DELAY_MS=2000 npm run check
 ```
+
+## Input Format
+
+The checker accepts any markdown file that contains Cursor referral URLs. The links do not need to be in a specific layout, as long as the URL appears in the file.
+
+Example plain list:
+
+```markdown
+https://cursor.com/referral?code=CODE1
+https://cursor.com/referral?code=CODE2
+https://cursor.com/referral?code=CODE3
+```
+
+Example markdown table:
+
+```markdown
+| URL |
+| --- |
+| https://cursor.com/referral?code=CODE1 |
+| https://cursor.com/referral?code=CODE2 |
+```
+
+## Terminal Output
+
+The checker prints progress in the terminal while it runs. Each line shows the referral code being checked and the result:
+
+```text
+[12/50] Checking ABC123... active
+[13/50] Checking XYZ789... redeemed
+[14/50] Checking QWE456... unknown
+```
+
+## Output Files
+
+After a run, you should expect these files:
+
+- `links.md` or your custom input file: replaced with a markdown table of results
+- `links.md.bak` or `<input>.bak`: backup of the original content before rewriting
+- `active-links-YYYY-MM-DD.md`: active links only, plus a simple summary
+
+## Status Meanings
+
+- `active`: the referral link appears to still be valid and eligible
+- `redeemed`: the referral link appears to have already been used or expired
+- `unknown`: the API response could not be classified, often because of rate limiting or an unexpected response
+
+Current classification logic is based on the API response shape:
+
+- Active links usually return data such as `{ isValid: true, userIsEligible: true, ... }`
+- Redeemed links often return `{}` or metadata indicating the link has already been used or expired
 
 ## How It Works
 
-1. Launches Chrome/Chromium browser with Playwright
-2. Navigates to each referral link
-3. Intercepts API calls to determine status
-4. Generates organized output files
+The main checker lives in `checkReferralCodes.ts` and uses `undici` to make direct HTTP requests to Cursor's referral endpoint:
 
-**Active link:** API returns `{ isValid: true, userIsEligible: true, ... }`  
-**Redeemed link:** API returns `{}`
+- It scans the input file line by line
+- It extracts referral codes from `cursor.com/referral?code=...` URLs
+- It posts each code to Cursor's API
+- It retries transient failures
+- It writes both the table output and the active-links file
 
-## Project Structure
+## Project Files
 
-```
+```text
 credit-checker/
-├── links-template.md             # Template for your links
-├── links.md                      # Your referral links (create from template)
-├── active-links-YYYY-MM-DD.md    # Generated: active links with credits
+├── checkReferralCodes.ts       # Main checker
+├── debugUnknown.ts             # Helper for inspecting hard-to-classify API responses
+├── links-template.md           # Starter input file
 ├── README.md
 ├── package.json
-├── tsconfig.json
-└── scripts/
-    └── checkWithBrowser.ts       # Main checker script
+└── tsconfig.json
 ```
 
-## Adding Your Links
+## Notes
 
-The tool accepts any markdown file with Cursor referral URLs, regardless of markdown formatting.
+- The input file is rewritten in place, so the `.bak` file is important
+- Duplicate referral URLs are checked only once per run
+- If no active links are found, the results table is still written back to the input file

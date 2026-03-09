@@ -3,17 +3,14 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "check": "ts-node scripts/checkReferralCodes.ts",
-    "check-browser": "ts-node scripts/checkWithBrowser.ts"
+    "check": "ts-node checkReferralCodes.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@playwright/test": "^1.56.1",
     "@types/node": "^24.8.1",
-    "playwright": "^1.56.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "undici": "^7.16.0"
