@@ -68,6 +68,14 @@ async function checkReferralInBrowser(
               resolve("redeemed");
               return;
             }
+
+            // metadata.title "already been used" or "expired" = redeemed (Cursor frontend logic)
+            const meta = json?.metadata;
+            const title = meta?.title?.toLowerCase() ?? "";
+            if (title.includes("already been used") || title.includes("expired")) {
+              resolve("redeemed");
+              return;
+            }
           }
 
           resolve("unknown");

@@ -11,8 +11,7 @@ interface ReferralStatus {
 
 const REFERRAL_REGEX = /https?:\/\/cursor\.com\/referral\?code=([A-Z0-9]+)/i;
 const API_ENDPOINT = "https://cursor.com/api/dashboard/check-referral-code";
-const DELAY_MS = parseInt(process.env.CHECK_DELAY_MS ?? "1000", 10);
-const COOKIES = process.env.CURSOR_COOKIES ?? "";
+const DELAY_MS = parseInt(process.env.CHECK_DELAY_MS ?? "500", 10);
 
 async function readReferralLinks(path: string): Promise<string[]> {
   const stream = createReadStream(path, { encoding: "utf8" });
@@ -37,7 +36,7 @@ async function checkReferral(code: string, retries = 3): Promise<"active" | "red
       }
 
       const headers: Record<string, string> = {
-        "accept": "application/json",
+        "accept": "*/*",
         "content-type": "application/json",
         "origin": "https://cursor.com",
         "referer": `https://cursor.com/referral?code=${code}`,
@@ -45,19 +44,14 @@ async function checkReferral(code: string, retries = 3): Promise<"active" | "red
           " AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
       };
 
-      if (COOKIES) {
-        headers["cookie"] = COOKIES;
-      }
-
       const { body, statusCode } = await request(API_ENDPOINT, {
         method: "POST",
         headers,
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ referralCode: code }),
       });
 
       if (statusCode === 200) {
         const json = await body.json();
-        console.log(`Code ${code}: HTTP 200`, JSON.stringify(json));
 
         // Active link returns: { isValid: true, userIsEligible: true, metadata: {...} }
         if (json && typeof json === "object" && "isValid" in json) {
@@ -70,6 +64,13 @@ async function checkReferral(code: string, retries = 3): Promise<"active" | "red
 
         // Empty object {} means already redeemed
         if (json && typeof json === "object" && Object.keys(json).length === 0) {
+          return "redeemed";
+        }
+
+        // metadata.title "already been used" or "expired" = redeemed (Cursor frontend logic)
+        const meta = (json as { metadata?: { title?: string } })?.metadata;
+        const title = meta?.title?.toLowerCase() ?? "";
+        if (title.includes("already been used") || title.includes("expired")) {
           return "redeemed";
         }
 
@@ -109,28 +110,59 @@ function buildTable(statuses: ReferralStatus[]): string {
   return lines.join("\n");
 }
 
+function buildActiveLinksMarkdown(
+  activeLinks: ReferralStatus[],
+  totalCount: number
+): string {
+  const now = new Date();
+  const dateStr = now.toISOString().split("T")[0];
+  const totalValue = activeLinks.length * 20;
+  const successRate = Math.round((activeLinks.length / totalCount) * 100);
+
+  const lines = [
+    "# Active Cursor Referral Links",
+    "",
+    `**Last Checked:** ${dateStr}`,
+    `**Total Active:** ${activeLinks.length} of ${totalCount} checked`,
+    `**Total Credits Available:** $${totalValue.toFixed(2)}`,
+    `**Success Rate:** ${successRate}%`,
+    "",
+    "---",
+    "",
+    "## Available Links",
+    "",
+  ];
+
+  activeLinks.forEach((link) => {
+    lines.push(link.url);
+  });
+
+  lines.push("");
+
+  return lines.join("\n");
+}
+
 function summarize(statuses: ReferralStatus[]): string {
   const redeemed = statuses.filter((s) => s.status === "redeemed").length;
   const active = statuses.filter((s) => s.status === "active");
   const unknown = statuses.filter((s) => s.status === "unknown").length;
 
   const summaryLines = [
+    "",
+    "=".repeat(60),
+    "SUMMARY",
+    "=".repeat(60),
     `Checked ${statuses.length} referral links.`,
-    `${redeemed} redeemed, ${active.length} active, ${unknown} unknown.`,
+    `${active.length} active | ${redeemed} redeemed | ${unknown} unknown`,
+    "",
   ];
 
   if (active.length > 0) {
-    summaryLines.push("Active links:");
-    for (const item of active) {
-      summaryLines.push(` - ${item.url}`);
-    }
-  }
-
-  if (redeemed > 0) {
-    summaryLines.push("Redeemed links:");
-    for (const item of statuses.filter((s) => s.status === "redeemed")) {
-      summaryLines.push(` - ${item.url}`);
-    }
+    summaryLines.push("Active links saved to active-links-{date}.md");
+    summaryLines.push("");
+  } else {
+    summaryLines.push("No active links found - all have been redeemed.");
+    summaryLines.push("");
   }
 
   return summaryLines.join("\n");
@@ -143,14 +175,11 @@ async function main() {
   const original = await readFile(path, "utf8");
   await writeFile(backupPath, original, "utf8");
 
-  const urls = await readReferralLinks(path);
+  let urls = await readReferralLinks(path);
+  urls = [...new Set(urls)];
   const statuses: ReferralStatus[] = [];
 
-  console.log(`Checking ${urls.length} referral codes...`);
-  if (!COOKIES) {
-    console.warn("⚠️  No CURSOR_COOKIES set - API calls will likely fail with HTTP 500");
-    console.warn("   Export your browser cookies to CURSOR_COOKIES environment variable");
-  }
+  console.log(`Checking ${urls.length} referral codes (deduplicated)...`);
 
   for (let i = 0; i < urls.length; i++) {
     const url = urls[i];
@@ -175,6 +204,16 @@ async function main() {
 
   const table = buildTable(statuses);
   await writeFile(path, `${table}\n`, "utf8");
+  console.log(`All results saved to: ${path}`);
+
+  const activeLinks = statuses.filter((s) => s.status === "active");
+  if (activeLinks.length > 0) {
+    const dateStr = new Date().toISOString().split("T")[0];
+    const activeFilename = `active-links-${dateStr}.md`;
+    const activeMd = buildActiveLinksMarkdown(activeLinks, statuses.length);
+    await writeFile(activeFilename, activeMd, "utf8");
+    console.log(`Active links saved to: ${activeFilename}`);
+  }
 
   const summary = summarize(statuses);
   console.log(summary);
