@@ -2,6 +2,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { createReadStream } from "node:fs";
 import { request } from "undici";
+import { cwd } from "node:process";
+import { isAbsolute, relative, resolve } from "node:path";
 
 interface ReferralStatus {
   url: string;
@@ -11,8 +13,18 @@ interface ReferralStatus {
 
 const REFERRAL_REGEX = /https?:\/\/cursor\.com\/referral\?code=([A-Z0-9]+)/i;
 const API_ENDPOINT = "https://cursor.com/api/dashboard/check-referral-code";
-const DELAY_MS = parseInt(process.env.CHECK_DELAY_MS ?? "500", 10);
+const DELAY_MS = Math.min(Math.max(parseInt(process.env.CHECK_DELAY_MS ?? "500", 10) || 500, 250), 10_000);
 const DEFAULT_INPUT_PATH = "links.md";
+
+function resolveWithinCwd(input: string): string {
+  const root = cwd();
+  const resolved = resolve(root, input);
+  const rel = relative(root, resolved);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error("Path must stay inside the working directory");
+  }
+  return resolved;
+}
 
 async function readReferralLinks(path: string): Promise<string[]> {
   const stream = createReadStream(path, { encoding: "utf8" });
@@ -194,8 +206,15 @@ async function main() {
     return;
   }
 
-  const path = process.argv[2] ?? DEFAULT_INPUT_PATH;
-  const backupPath = `${path}.bak`;
+  let inputPath: string;
+  try {
+    inputPath = resolveWithinCwd(process.argv[2] ?? DEFAULT_INPUT_PATH);
+  } catch {
+    console.error("Error: input path must be inside the current working directory.");
+    process.exitCode = 1;
+    return;
+  }
+  const backupPath = `${inputPath}.bak`;
 
   console.log("Cursor Referral Link Checker");
   console.log("============================");
@@ -205,9 +224,9 @@ async function main() {
 
   let original: string;
   try {
-    original = await readFile(path, "utf8");
+    original = await readFile(inputPath, "utf8");
   } catch {
-    console.error(`Error: Could not read file '${path}'`);
+    console.error(`Error: Could not read file '${inputPath}'`);
     console.error("Make sure the file exists and contains referral URLs.");
     console.error("");
     printUsage();
@@ -218,7 +237,7 @@ async function main() {
   await writeFile(backupPath, original, "utf8");
   console.log(`Backup created: ${backupPath}`);
 
-  let urls = await readReferralLinks(path);
+  let urls = await readReferralLinks(inputPath);
   urls = [...new Set(urls)];
   const statuses: ReferralStatus[] = [];
 
@@ -259,13 +278,13 @@ async function main() {
 
   console.log("");
   const table = buildTable(statuses);
-  await writeFile(path, `${table}\n`, "utf8");
-  console.log(`All results saved to: ${path}`);
+  await writeFile(inputPath, `${table}\n`, "utf8");
+  console.log(`All results saved to: ${inputPath}`);
 
   const activeLinks = statuses.filter((s) => s.status === "active");
   if (activeLinks.length > 0) {
     const dateStr = new Date().toISOString().split("T")[0];
-    const activeFilename = `active-links-${dateStr}.md`;
+    const activeFilename = resolveWithinCwd(`active-links-${dateStr}.md`);
     const activeMd = buildActiveLinksMarkdown(activeLinks, statuses.length);
     await writeFile(activeFilename, activeMd, "utf8");
     console.log(`Active links saved to: ${activeFilename}`);
